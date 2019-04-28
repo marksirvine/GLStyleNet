@@ -37,7 +37,7 @@ def build_base_net(input_tensor,input_map=None):
     assert os.path.exists(vgg19_file), ("Model file with pre-trained convolution layers not found. Download here: "
         +"https://github.com/alexjc/neural-doodle/releases/download/v0.0/vgg19_conv.pkl.bz2")
 
-    data = np.load(bz2.open(vgg19_file, 'rb'))
+    data = np.load(bz2.open(vgg19_file, 'rb'), allow_pickle=true)
     k = 0
     net = {}
     # network divided into two parts，main and map，main downsamples the image，map dowsamples the semantic map
@@ -83,10 +83,10 @@ def build_base_net(input_tensor,input_map=None):
 
     net['map'] = input_map
     for j, i in itertools.product(range(5), range(4)):
-        if j < 2 and i > 1: continue 
+        if j < 2 and i > 1: continue
         suffix = '%i_%i' % (j+1, i+1)
 
-        if i == 0: 
+        if i == 0:
             net['map%i'%(j+1)] = avg_pooling(net['map'], 2**j)
         net['sem'+suffix] = tf.concat([net['conv'+suffix], net['map%i'%(j+1)]], -1)
     return net
@@ -105,34 +105,34 @@ def extract_target_data(content, content_mask, style, style_mask):
         lf=local_features[i]
         LF=tf.image.resize_images(LF,[lf.shape[1],lf.shape[2]],method=tf.image.ResizeMethod.BILINEAR)
         LF=tf.concat([LF,lf],3)
-      
+
     dim = LF.shape[-1].value
     x = tf.extract_image_patches(LF, (1,3,3,1), (1,1,1,1), (1,1,1,1), 'VALID')
     patches=tf.reshape(x, (-1, 3, 3, dim))
-       
+
     # content features
     input_tensor = content-pixel_mean
     input_map= content_mask
-    net = build_base_net(input_tensor, input_map)    
+    net = build_base_net(input_tensor, input_map)
     content_features = [net['conv'+layer] for layer in CONTENT_LAYERS]
     content_data=[]
-    
+
     # global feature correlations based on fused features
     input_tensor = style-pixel_mean
     input_map= style_mask
-    net = build_base_net(input_tensor, input_map)    
+    net = build_base_net(input_tensor, input_map)
     global_features = [net['conv'+layer] for layer in GLOBAL_STYLE_LAYERS]
     GF=global_features[0]
     for i in range(1,len(GLOBAL_STYLE_LAYERS)):
         gf=global_features[i]
         GF=tf.image.resize_images(GF,[gf.shape[1],gf.shape[2]],method=tf.image.ResizeMethod.BILINEAR)
         GF=tf.concat([GF,gf],3)
-        
+
     N=int(GF.shape[3])
     M=int(GF.shape[1]*GF.shape[2])
-    GF=tf.reshape(GF,(M,N))   
+    GF=tf.reshape(GF,(M,N))
     GF_corr=tf.matmul(tf.transpose(GF),GF)
-    
+
     with tf.Session() as sess:
         sess.run(tf.global_variables_initializer())
         patches=patches.eval()
@@ -142,7 +142,7 @@ def extract_target_data(content, content_mask, style, style_mask):
 
     return content_data,patches,global_data
 
-        
+
 def format_and_norm(arr, depth, sem_weight):
     n, *shape = arr.shape
     norm = np.zeros(shape+[n], dtype=arr.dtype)
@@ -154,7 +154,7 @@ def format_and_norm(arr, depth, sem_weight):
         t1 = t1/np.sqrt(3*np.sum(t1**2)+1e-6)
         t2 = t[..., depth:]
         t2 = t2/np.sqrt(sem_weight*np.sum(t2**2)+1e-6)
-        
+
         norm[..., i] = np.concatenate([t1,t2], -1)
     return norm, un_norm
 
@@ -173,7 +173,7 @@ class Model(object):
         self.content = np.expand_dims(content, 0).astype(np.float32)
         self.style = np.expand_dims(style, 0).astype(np.float32)
         self.style2= np.expand_dims(style2, 0).astype(np.float32)
-        
+
         if content_mask is not None:
             self.content_mask = np.expand_dims(content_mask, 0).astype(np.float32)
         else:
@@ -185,42 +185,42 @@ class Model(object):
             self.style_mask = np.ones(self.style.shape[:-1]+(1,), np.float32)
             self.args.semantic_weight = 0.0
         assert self.content_mask.shape[-1] == self.style_mask.shape[-1]
-        
-       
+
+
         self.args.semantic_weight=100/self.args.semantic_weight if self.args.semantic_weight else 1E+8
-        
+
         self.mask_depth = self.content_mask.shape[-1]
         # get target content features, local patches, global feature correlations
         self.content_data, self.local_data, self.global_data= extract_target_data(self.content, self.content_mask, self.style, self.style_mask)
         tf.reset_default_graph()
-        
+
         if args.init=='style':
             input_tensor = tf.Variable(self.style2)
         elif args.init=='content':
             input_tensor = tf.Variable(self.content)
         else:
             input_tensor = tf.Variable(np.random.uniform(16, 240, self.content.shape).astype(np.float32))
-            
+
         input_map=tf.Variable(self.content_mask)
         self.net = build_base_net(input_tensor, input_map)
 
         self.content_features = [self.net['conv'+layer] for layer in CONTENT_LAYERS]
         self.local_features = [self.net['sem'+layer] for layer in LOCAL_STYLE_LAYERS]
         self.global_features = [self.net['conv'+layer] for layer in GLOBAL_STYLE_LAYERS]
-        
+
         # local style layer aggregation
         LF=self.local_features[0]
         for i in range(1,len(LOCAL_STYLE_LAYERS)):
             lf=self.local_features[i]
             LF=tf.image.resize_images(LF,[lf.shape[1],lf.shape[2]],method=tf.image.ResizeMethod.BILINEAR)
             LF=tf.concat([LF,lf],3)
-        
+
         # patch-matching,concatenate semantic maps
         self.local_loss = 0
         sem = LF
         patches = tf.extract_image_patches(sem, (1,3,3,1), (1,1,1,1), (1,1,1,1), 'VALID')
         patches = tf.reshape(patches, (-1, 3, 3, sem.shape[-1].value))
-        
+
         pow2 = patches**2
         p1 = tf.reduce_sum(pow2[..., :-self.mask_depth], [1,2,3])
         p1 = tf.reshape(p1, [-1,1,1,1])
@@ -230,27 +230,27 @@ class Model(object):
         p2 = pow2[..., -self.mask_depth:]/(self.args.semantic_weight*p2+1e-6)
         norm_patch = tf.concat([p1, p2], -1)
         norm_patch = tf.reshape(norm_patch, [-1, 9*sem.shape[-1].value])
-        
+
         norm, un_norm = format_and_norm(self.local_data, -self.mask_depth, self.args.semantic_weight)
         norm = np.reshape(norm, [9*sem.shape[-1].value, -1])
         sim = tf.matmul(norm_patch, norm)
         max_ind = tf.argmax(sim, axis=-1)
         target_patches = tf.gather(self.local_data, tf.reshape(max_ind, [-1]))
-        
+
         # local style loss
         self.local_loss += tf.reduce_mean((patches[...,:-self.mask_depth]-target_patches[...,:-self.mask_depth])**2)
         self.local_loss *= args.local_weight
-        
+
         # content loss
         self.content_loss = 0
         for c, t in zip(self.content_features, self.content_data) :
             self.content_loss += tf.reduce_mean((c-t)**2)
         self.content_loss *= args.content_weight
-        
+
         # total variation regularization loss
         self.tv_loss = args.smoothness*(tf.reduce_mean(tf.abs(input_tensor[..., :-1,:]-input_tensor[..., 1:,:]))
                                 +tf.reduce_mean(tf.abs(input_tensor[..., :, :-1]-input_tensor[..., :,1:])))
-        
+
         # global style loss
         GF=self.global_features[0]
         for i in range(1,len(GLOBAL_STYLE_LAYERS)):
@@ -260,12 +260,12 @@ class Model(object):
 
         N=int(GF.shape[3])
         M=int(GF.shape[1]*GF.shape[2])
-        GF=tf.reshape(GF,(M,N))   
+        GF=tf.reshape(GF,(M,N))
         GF_corr=tf.matmul(tf.transpose(GF),GF)
-        
+
         self.global_loss = tf.reduce_sum(((GF_corr-self.global_data)**2)/((2*M*N)**2))
         self.global_loss *= args.global_weight
-        
+
         # total loss
         self.loss = self.local_loss + self.content_loss + self.tv_loss + self.global_loss
         self.grad = tf.gradients(self.loss, self.net['img'])
@@ -313,7 +313,7 @@ class Model(object):
             Xn = self.content
         else:
             Xn = np.random.uniform(16, 240, self.content.shape).astype(np.float32)
-            
+
         self.iter = 0
         # Optimization algorithm needs min and max bounds to prevent divergence.
         data_bounds = np.zeros((np.product(Xn.shape), 2), dtype=np.float64)
@@ -336,12 +336,12 @@ class Model(object):
             print("User canceled.")
         except Exception as e:
             print(e)
-            
+
         print ("GLStyleNet: Completed!")
 
         self.summary_writer.close()
-    
-    
+
+
 def prepare_mask(content_mask, style_mask, n):
     from sklearn.cluster import KMeans
     x1 = content_mask.reshape((-1, content_mask.shape[-1]))
@@ -369,22 +369,22 @@ def main():
     add_arg('--global-weight',     default=0.1,  type=float,   help='Weight of global style loss.')
     add_arg('--output',        default='output', type=str, help='Output image path.')
     add_arg('--smoothness',      default=1E+0, type=float,    help='Weight of image smoothing scheme.')
-    
+
     add_arg('--init',         default='content', type=str,   help='Image path to initialize, "noise" or "content" or "style".')
     add_arg('--iterations',     default=500, type=int,       help='Number of iterations.')
     add_arg('--device',         default='gpu', type=str,    help='devices: "gpu"(default: all gpu) or "gpui"(e.g. gpu0) or "cpu" ')
     add_arg('--class-num',      default=5, type=int,      help='Count of semantic mask classes.')
-    
+
     args = parser.parse_args()
-    
+
     style = skimage.io.imread(args.style)
     if args.style_mask:
         style_mask = skimage.io.imread(args.style_mask)
-    
+
     content = skimage.io.imread(args.content)
     if args.content_mask:
         content_mask = skimage.io.imread(args.content_mask)
-    
+
     if style.shape[0]==content.shape[0] and style.shape[1]==content.shape[1]:
         style2=style
     else:
