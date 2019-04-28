@@ -37,7 +37,7 @@ def build_base_net(input_tensor,input_map=None):
     assert os.path.exists(vgg19_file), ("Model file with pre-trained convolution layers not found. Download here: "
         +"https://github.com/alexjc/neural-doodle/releases/download/v0.0/vgg19_conv.pkl.bz2")
 
-    data = np.load(bz2.open(vgg19_file, 'rb'), allow_pickle=true)
+    data = np.load(bz2.open(vgg19_file, 'rb'), allow_pickle=True)
     k = 0
     net = {}
     # network divided into two parts，main and map，main downsamples the image，map dowsamples the semantic map
